@@ -792,7 +792,7 @@ with c1:
 with c2:
     StepIndY_to_use = st.number_input("shannon limit", value=50, step=5)
 with c3:
-    startcycle_to_use = st.number_input("skipped cycles", value=2, step=1)
+    startcycle_to_use = st.number_input("skipped cycles", value=5, step=1)
 
 mask = edited_grid.astype(bool)
 selected_rows = [r for r in mask.index if mask.loc[r].any()]
