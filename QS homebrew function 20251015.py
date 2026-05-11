@@ -631,6 +631,14 @@ def full_plate_select(df: pd.DataFrame,
     return out
 
 
+# Auto-select the whole plate when a new file is uploaded
+if uploaded_files:
+    _upload_key = tuple(f.name for f in uploaded_files)
+    if st.session_state.get('_last_upload_key') != _upload_key:
+        st.session_state['_last_upload_key'] = _upload_key
+        st.session_state[grid_key] = full_plate_select(make_plate_df(plate_format))
+        plate_df = st.session_state[grid_key]
+
 # ---- UI controls for full-plate selection ----
 cc1, cc2, cc3, cc4 = st.columns([1, 1, 1, 1])
 
@@ -876,11 +884,29 @@ Ct_homebrew = {w: np.nan for w in all_wells}
 baseline_start = {w: np.nan for w in all_wells}
 baseline_end = {w: np.nan for w in all_wells}
 
+# Plate-level empty-well detection: wells with both FAM and ROX below 5% of
+# plate maximum are considered empty (no reaction mix loaded) → Ct = NaN.
+_mean_fam = {w: df[df["Well Position"].astype(str)==w][fam_raw_ch].astype(float).mean()
+             for w in selected_wells}
+_mean_rox = {w: df[df["Well Position"].astype(str)==w][rox_raw_ch].astype(float).mean()
+             for w in selected_wells}
+_max_fam = max(_mean_fam.values(), default=1.0)
+_max_rox = max(_mean_rox.values(), default=1.0)
+_fam_floor = _max_fam * 0.05
+_rox_floor = _max_rox * 0.05
+
 fig, ax = plt.subplots(figsize=(6,4))
 for well in selected_wells:
     sub = df[df["Well Position"].astype(str) == str(well)]
     fam_y = sub[fam_raw_ch].astype(float)
     rox_y = sub[rox_raw_ch].astype(float)
+
+    # Skip empty wells
+    if _mean_fam[well] < _fam_floor and _mean_rox[well] < _rox_floor:
+        baseline_start[well] = np.nan
+        baseline_end[well] = np.nan
+        continue
+
     fit_start, fit_end = _get_fit_window(well, startcycle_to_use)
     y_norm = SPR_fitbackground(median_intercept,fam_y,rox_y,fit_start,fit_end,cycles)
     y_bg,start_point,start,end,_ = spr_QSqpcr_background_dY_v5(res_std, y_norm, sigma_mult=2, min_points=4, max_refit_iter = 3, startcycle = startcycle_to_use, window_size = window_size_to_use, StepIndY = StepIndY_to_use)
