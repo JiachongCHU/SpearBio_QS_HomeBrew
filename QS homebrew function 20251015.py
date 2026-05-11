@@ -17,7 +17,7 @@ from PIL import Image
 
 
 
-version = "demo v1.0.0"
+version = "demo v1.1.0"
 
 @st.cache_data(show_spinner=False)
 def load_quantstudio(uploaded_file) -> pd.DataFrame:
@@ -784,7 +784,7 @@ with c1:
 with c2:
     StepIndY_to_use = st.number_input("shannon limit", value=50, step=5)
 with c3:
-    startcycle_to_use = st.number_input("skipped cycles", value=10, step=1)
+    startcycle_to_use = st.number_input("skipped cycles", value=5, step=1)
 
 mask = edited_grid.astype(bool)
 selected_rows = [r for r in mask.index if mask.loc[r].any()]
@@ -848,12 +848,24 @@ idxs = np.where(mask)[0]
 median_intercept = np.median(x[idxs])
 
 # print (median_intercept)
+def _get_fit_window(well, startcycle):
+    liftoff = startpoint_all[well]
+    bs = start_i[well]
+    be = end_i[well]
+    if 0 < liftoff <= 15 and liftoff - startcycle >= 3:
+        return startcycle, liftoff
+    elif bs - startcycle >= 3:
+        return startcycle, bs
+    else:
+        return bs, be
+
 ref_y_bg = []
 for refwell in qPOSwells:
     sub = df[df["Well Position"].astype(str) == str(refwell)]
     fam_y = sub[fam_raw_ch].astype(float)
     rox_y = sub[rox_raw_ch].astype(float)
-    y_norm = SPR_fitbackground(median_intercept,fam_y,rox_y,start_i[refwell],end_i[refwell],cycles) #if (np.mean(bkg) > 0) else fam_y / rox_y
+    fit_start, fit_end = _get_fit_window(refwell, startcycle_to_use)
+    y_norm = SPR_fitbackground(median_intercept,fam_y,rox_y,fit_start,fit_end,cycles)
     y_bg,start_point,start,end,intercept = spr_QSqpcr_background_dY_v5(res_std, y_norm, sigma_mult=2, min_points=4, max_refit_iter = 3, startcycle = startcycle_to_use, window_size = window_size_to_use, StepIndY = StepIndY_to_use)
     ref_y_bg.append(y_bg)
     
@@ -869,7 +881,8 @@ for well in selected_wells:
     sub = df[df["Well Position"].astype(str) == str(well)]
     fam_y = sub[fam_raw_ch].astype(float)
     rox_y = sub[rox_raw_ch].astype(float)
-    y_norm = SPR_fitbackground(median_intercept,fam_y,rox_y,start_i[well],end_i[well],cycles) #if (np.mean(bkg) > 0) else fam_y / rox_y
+    fit_start, fit_end = _get_fit_window(well, startcycle_to_use)
+    y_norm = SPR_fitbackground(median_intercept,fam_y,rox_y,fit_start,fit_end,cycles)
     y_bg,start_point,start,end,_ = spr_QSqpcr_background_dY_v5(res_std, y_norm, sigma_mult=2, min_points=4, max_refit_iter = 3, startcycle = startcycle_to_use, window_size = window_size_to_use, StepIndY = StepIndY_to_use)
     ct, _ = calculate_ct(cycles, y_bg,  threshold=threshold_Ct, return_std=True,use_4pl=False,startpoint = start_point)
     Ct_homebrew[well] = ct
