@@ -810,6 +810,7 @@ startpoint_all = {}
 bg_subtracked_y = {}
 start_i = {}
 end_i = {}
+_rox_means_ic = {}
 
 
 for i, r in enumerate(selected_rows):
@@ -822,36 +823,44 @@ for i, r in enumerate(selected_rows):
         sub = df[df["Well Position"].astype(str) == str(well)]
         rox_y = sub[rox_raw_ch].astype(float).to_numpy()
         fam_y = sub[fam_raw_ch].astype(float).to_numpy()
+        _rox_means_ic[well] = np.nanmean(rox_y)
         y_norm = fam_y/rox_y
         y_bg,start_point,start,end,intercept = spr_QSqpcr_background_dY_v5(res_std, y_norm, sigma_mult=2, min_points=4, max_refit_iter = 3, startcycle = startcycle_to_use, window_size = window_size_to_use, StepIndY = StepIndY_to_use,returnbase = False)
         if start_point == -1:
             print (f'{well}')
         start_i[well] = start
         end_i[well] = end
-        startpoint_all[well] = start_point       
+        startpoint_all[well] = start_point
         intercept_all[well] = intercept
 
 for well in qPOSwells:
     sub = df[df["Well Position"].astype(str) == str(well)]
     rox_y = sub[rox_raw_ch].astype(float).to_numpy()
     fam_y = sub[fam_raw_ch].astype(float).to_numpy()
+    _rox_means_ic[well] = np.nanmean(rox_y)
     y_norm = fam_y/rox_y
     y_bg,start_point,start,end,intercept = spr_QSqpcr_background_dY_v5(res_std, y_norm, sigma_mult=2, min_points=4, max_refit_iter = 3, startcycle = startcycle_to_use, window_size = window_size_to_use, StepIndY = StepIndY_to_use,returnbase = False)
     if start_point == -1:
         print (f'{well}')
     start_i[well] = start
     end_i[well] = end
-    startpoint_all[well] = start_point       
+    startpoint_all[well] = start_point
     intercept_all[well] = intercept
 
-x = np.array(list(intercept_all.values()), dtype=float).ravel()
+# Exclude low-ROX buffer/empty wells (< 20% of plate max) from intercept
+# estimation. Even-column buffer wells (~13% of max ROX) would otherwise skew
+# the plate reference intercept on full-plate runs.
+_max_rox_ic   = max(_rox_means_ic.values(), default=1.0)
+_rox_floor_ic = _max_rox_ic * 0.20
+_wells_ic = [w for w in intercept_all if _rox_means_ic.get(w, 0) >= _rox_floor_ic]
+x = np.array([intercept_all[w] for w in _wells_ic], dtype=float).ravel()
 Q1,Q3 = np.percentile(x, (25,75))
 IQR = Q3 - Q1
 upper = Q3 + 1.5 * IQR
 lower = Q1 - 1.5 * IQR
 
-mask = np.isfinite(x) & (x<upper) & (x>lower)
-idxs = np.where(mask)[0]
+_ic_mask = np.isfinite(x) & (x<upper) & (x>lower)
+idxs = np.where(_ic_mask)[0]
 
 median_intercept = np.median(x[idxs])
 
