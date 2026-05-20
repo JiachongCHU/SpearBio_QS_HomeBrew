@@ -332,26 +332,30 @@ def SPR_fitbackground(median_intercept,fam_y,rox_y,start,end,cycles,plot = False
     window = np.arange(start,end)
     fam_y_window = fam_y[start:end]
     rox_y_window = rox_y[start:end]
-    
+
     popt, pcov = curve_fit(linear_exp_fit, window, fam_y_window, p0=[1, 2, 0.1])  # p0 = initial guess
     a,b,c = popt
-    fam_bkg_fit = a*cycles + c
 
     popt, pcov = curve_fit(linear_fit, window, rox_y_window, p0=[1, 0.1])  # p0 = initial guess
     d,e = popt
-    rox_bkg_fit = d*cycles + e
+    # Use 0-indexed positions k'=0..n-1 matching the fit coordinate system.
+    # c and e are intercepts at k'=0; using 1-indexed cycles would introduce a
+    # constant offset of (a - mi*d) in every bkg value.
+    kp = np.arange(len(fam_y))
+    fam_bkg_fit = a*kp + c
+    rox_bkg_fit = d*kp + e
     if plot:
         plt.plot(cycles,fam_y,label = f'fam')
         plt.plot(cycles,rox_y,label = f'rox')
         plt.plot(cycles,fam_bkg_fit,'--',label = f'fam* fit')
         plt.plot(cycles,rox_bkg_fit,'--',label = f'rox fit')
         plt.legend()
-        plt.show()  
-    bkg = (a - median_intercept*d) * cycles + (c - median_intercept*e)
+        plt.show()
+    bkg = (a - median_intercept*d) * kp + (c - median_intercept*e)
     if np.mean(bkg)>0:
         return (fam_y - bkg) / rox_y
     else:
-        bkg = (d - a/median_intercept) * cycles + (e - c/median_intercept)
+        bkg = (d - a/median_intercept) * kp + (e - c/median_intercept)
         return fam_y / (rox_y - bkg)
 
 def spr_QSqpcr_background_dY_residue(df, selected_wells, startcycle = 6, window_size = 6, StepIndY = 100):
