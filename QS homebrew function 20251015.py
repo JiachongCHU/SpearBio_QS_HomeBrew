@@ -17,7 +17,7 @@ from PIL import Image
 
 
 
-version = "demo v1.1.0"
+version = "1.4.0"
 
 @st.cache_data(show_spinner=False)
 def load_quantstudio(uploaded_file) -> pd.DataFrame:
@@ -328,16 +328,55 @@ def linear_exp_fit(x,a,b,c):
 def linear_fit(x,d,e):
     return d*x + e
     
+def _theil_sen(x, y):
+    """Theil-Sen robust line fit: slope = median of pairwise slopes,
+    intercept = median(y - slope*x).
+
+    Matches SPR_Middleware.Core.Algorithms.CurveFitter.FitTheilSen (HomeBrew 1.4).
+    NOTE: this is deliberately NOT scipy.stats.theilslopes, which computes the
+    intercept as median(y) - slope*median(x); that differs from the shipped
+    middleware and would offset every background value.
+    """
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n = x.size
+    if n < 2:
+        return _ols_line(x, y)
+    slopes = []
+    for i in range(n - 1):
+        dx = x[i + 1:] - x[i]
+        ok = dx != 0
+        if ok.any():
+            slopes.append((y[i + 1:][ok] - y[i]) / dx[ok])
+    if not slopes:
+        return _ols_line(x, y)
+    slope = float(np.median(np.concatenate(slopes)))
+    intercept = float(np.median(y - slope * x))
+    return slope, intercept
+
+
+def _ols_line(x, y):
+    """Ordinary least-squares line; fallback used when Theil-Sen is undefined."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if x.size < 2:
+        return 0.0, float(y[0]) if y.size else 0.0
+    slope, intercept = np.polyfit(x, y, 1)
+    return float(slope), float(intercept)
+
+
 def SPR_fitbackground(median_intercept,fam_y,rox_y,start,end,cycles,plot = False):
     window = np.arange(start,end)
     fam_y_window = fam_y[start:end]
     rox_y_window = rox_y[start:end]
 
-    popt, pcov = curve_fit(linear_exp_fit, window, fam_y_window, p0=[1, 2, 0.1])  # p0 = initial guess
-    a,b,c = popt
-
-    popt, pcov = curve_fit(linear_fit, window, rox_y_window, p0=[1, 0.1])  # p0 = initial guess
-    d,e = popt
+    # HomeBrew 1.4 (CHANGE 7): Theil-Sen robust linear baseline for FAM and ROX.
+    # The background only ever consumed the linear slope+intercept (the old code
+    # fit FAM as linear+exponential and then discarded the exponential term), and
+    # the fit window is the pre-liftoff flat region - so this is the same model,
+    # estimated immune to early-cycle leverage points (ROX/FAM glitches).
+    a, c = _theil_sen(window, fam_y_window)
+    d, e = _theil_sen(window, rox_y_window)
     # Use 0-indexed positions k'=0..n-1 matching the fit coordinate system.
     # c and e are intercepts at k'=0; using 1-indexed cycles would introduce a
     # constant offset of (a - mi*d) in every bkg value.
@@ -358,7 +397,7 @@ def SPR_fitbackground(median_intercept,fam_y,rox_y,start,end,cycles,plot = False
         bkg = (d - a/median_intercept) * kp + (e - c/median_intercept)
         return fam_y / (rox_y - bkg)
 
-def spr_QSqpcr_background_dY_residue(df, selected_wells, startcycle = 6, window_size = 6, StepIndY = 100):
+def spr_QSqpcr_background_dY_residue(df, selected_wells, startcycle = 5, window_size = 8, StepIndY = 50):
     fam_raw_ch = 'X1_M1'   # pre: FAM raw
     rox_raw_ch = 'X4_M4'   # pre: ROX raw
      
@@ -415,7 +454,7 @@ def spr_QSqpcr_background_dY_residue(df, selected_wells, startcycle = 6, window_
     mean, std = scnorm.fit(x)
     return residue,mean,std
     
-def spr_QSqpcr_background_dY_v5(std, test_signal, sigma_mult=2.0, min_points=4, max_refit_iter = 3, startcycle = 6, window_size = 6, StepIndY = 40, returnbase = False):
+def spr_QSqpcr_background_dY_v5(std, test_signal, sigma_mult=2.0, min_points=4, max_refit_iter = 3, startcycle = 5, window_size = 8, StepIndY = 50, returnbase = False):
     y = np.asarray(test_signal, dtype=float)
     n = len(y)
     A = np.arange(n)
@@ -870,11 +909,21 @@ median_intercept = np.median(x[idxs])
 
 # print (median_intercept)
 def _get_fit_window(well, startcycle):
+    """HomeBrew 1.4 fit-window selection (CHANGE 4).
+
+    Mirrors AnalysisService.GetFitWindow in SPR_Middleware v1.4:
+      - when detection found no liftoff (start_point < 0) fall back to be - 3;
+      - liftoff branch widened to < 20 cycles and floored at startcycle + 3,
+        so a liftoff close to startcycle still yields a usable 3-cycle window
+        instead of dropping through to the baseline-start branch.
+    """
     liftoff = startpoint_all[well]
     bs = start_i[well]
     be = end_i[well]
-    if 0 < liftoff <= 15 and liftoff - startcycle >= 3:
-        return startcycle, liftoff
+    if liftoff < 0:
+        liftoff = be - 3
+    if 0 < liftoff < 20:
+        return startcycle, max(startcycle + 3, liftoff)
     elif bs - startcycle >= 3:
         return startcycle, bs
     else:
