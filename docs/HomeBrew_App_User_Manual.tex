@@ -1,0 +1,199 @@
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{array}
+\usepackage{parskip}
+\usepackage{verbatim}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=black,urlcolor=blue]{hyperref}
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.2}
+\definecolor{navy}{RGB}{7,57,84}
+\definecolor{teal}{RGB}{32,150,187}
+\newcommand{\note}[1]{\par\noindent\fbox{\parbox{0.97\linewidth}{#1}}\par\medskip}
+
+\title{\color{navy}QuantStudio HomeBrew Analysis Tool\\[2pt]
+       \large\color{teal}User Manual — version 1.4.0}
+\author{Spear Bio · Platform Development}
+\date{\today}
+
+\begin{document}
+\maketitle
+\thispagestyle{empty}
+
+\section*{What this tool does}
+It re-analyses a QuantStudio qPCR run with the \textbf{Spear Bio HomeBrew algorithm}
+instead of the instrument's own Design \& Analysis (DA2) Cq. You give it the raw
+per-cycle fluorescence that DA2 exports; it normalises FAM against ROX, fits and
+removes each well's background, places a single plate-wide threshold so that your
+qPOS wells land on a target Ct, and reports a Cq for every selected well.
+
+The result is a Cq that is consistent from plate to plate and anchored to your own
+controls, rather than to whatever threshold DA2 happened to choose.
+
+\note{\textbf{Same algorithm as the desktop tool.} This web app and
+\emph{SPR Middleware v1.4} implement the same HomeBrew 1.4 algorithm with the same
+default parameters. Use whichever is convenient; the Cq should agree closely.}
+
+\tableofcontents
+\newpage
+
+\section{Before you start: exporting from Design \& Analysis}
+The app reads the \textbf{raw per-cycle detector data}, i.e. the \textbf{Raw Data}
+sheet, which holds the channel columns \texttt{X1\_M1} (FAM channel) and
+\texttt{X4\_M4} (ROX channel).
+
+In DA2, open the run and use \textbf{Export}. Either of these works:
+
+\begin{center}
+\begin{tabular}{|p{0.36\textwidth}|p{0.56\textwidth}|}
+\hline
+\textbf{Export style} & \textbf{What to upload} \\ \hline
+Combined workbook & One \texttt{.xlsx} containing all sheets. Upload that single file. \\ \hline
+Separate files & Upload the file whose name contains \texttt{Raw Data}. Either
+\texttt{.xlsx} or \texttt{.csv} is accepted. \\ \hline
+\end{tabular}
+\end{center}
+
+You do not need the Results, Amplification Data or Multicomponent sheets — the app
+computes its own. Extra files are ignored as long as one of them is Raw Data.
+
+\section{Step-by-step}
+
+\subsection{1 — Upload}
+Drag the export onto \textbf{Design and Analysis exported files}. On success the app
+prints either \emph{Loaded combined workbook: \dots} or \emph{All key files loaded
+successfully!}
+
+\subsection{2 — Plate format}
+Choose \textbf{384-well (16$\times$24)} or \textbf{96-well (8$\times$12)}. This sets
+the grid and the default qPOS wells, so set it before selecting wells.
+
+\subsection{3 — Select the wells to analyse}
+Only selected wells are analysed, plotted and exported. Three ways to select, and
+they combine:
+
+\begin{itemize}
+\item \textbf{Bulk rules} — pick a \emph{Row rule} (all / odd / even), a
+      \emph{Column rule} (all / odd / even), set \emph{Mode} to Select or Deselect,
+      then press \textbf{Apply full-plate selection}. Odd/even rules are the quick
+      way to handle plates where only alternate columns are loaded.
+\item \textbf{Whole rows / columns} — choose from the two multi-selects, then
+      \textbf{Apply row/col selection}.
+\item \textbf{The grid} — tick or untick individual wells directly.
+\end{itemize}
+
+The running count is shown as \emph{N wells selected}, and the expander lists them.
+
+\note{\textbf{Do not select empty wells.} A well with no reaction mix has no real
+curve. The app guards against the obvious case — any well whose mean FAM \emph{and}
+mean ROX are below 5\,\% of the plate maximum is reported as no-Ct — but wells
+containing buffer only can still pass that test and add noise. Select what you
+actually loaded.}
+
+\subsection{4 — qPOS (reference) wells}
+Pick the wells that carry the qPCR positive control. Defaults are \textbf{O24, P24}
+on a 384-well plate and \textbf{H6, H12} on a 96-well plate.
+
+This is the single most important input. The threshold is chosen so the
+\emph{average} Ct of these wells equals the target Ct, so every reported Cq on the
+plate is anchored to them. Pointing at the wrong wells shifts the whole plate.
+
+\subsection{5 — Parameters}
+\begin{center}
+\begin{tabular}{|l|c|p{0.52\textwidth}|}
+\hline
+\textbf{Control} & \textbf{Default} & \textbf{Meaning} \\ \hline
+target ct & 25.0 & Ct the qPOS wells are driven to. Changes the threshold, and so
+every Cq on the plate. \\ \hline
+background screening window & 8 & Width of the rolling window used to find where
+each curve lifts off the baseline. \\ \hline
+shannon limit & 50 & Sensitivity of that liftoff detector; the step threshold is
+the curve's 5--95\,\% span divided by this number. Larger = more sensitive. \\ \hline
+skipped cycles & 5 & Early cycles ignored before analysis starts. \\ \hline
+\end{tabular}
+\end{center}
+
+\note{\textbf{Leave these at the defaults unless you have a specific reason.} They
+are the validated HomeBrew 1.4 values and match SPR Middleware v1.4. Changing them
+changes reported Cq, and results produced with non-default settings are not
+comparable to anyone else's.}
+
+\subsection{6 — Read the plot}
+The chart shows every selected well after ROX normalisation and background
+subtraction, on a \textbf{log} y-axis, with the fitted threshold as a dashed black
+line. Use it as a sanity check before trusting the numbers:
+
+\begin{itemize}
+\item curves should be flat early and rise smoothly;
+\item the threshold line should sit in the straight part of the rise, not up in the
+      plateau nor down in the noise;
+\item a well that wanders below zero, or never crosses, will not produce a Cq.
+\end{itemize}
+
+\subsection{7 — Export}
+\textbf{Download QS-style Results (HomeBrew Cq)} writes
+\texttt{<run>\_Results\_SpearBio\_HomeBrew.xlsx}: a single \texttt{Results} sheet
+laid out like a DA2 export, with a metadata block and the table starting on row 26,
+so it drops into existing DA2-shaped workflows. Columns include the well, the
+HomeBrew Cq, and the baseline start/end actually used for that well.
+
+\note{The metadata block is filled with \emph{placeholder} instrument fields
+(QuantStudio 5, 20\,\textmu L, and the current date/time) so the file matches the DA2
+shape. Do not read those as a record of the real run --- the run's identity comes
+from the file name.}
+
+\section{How the number is produced}
+For each selected well, in order:
+
+\begin{enumerate}
+\item \textbf{Normalise} --- divide the FAM channel (\texttt{X1\_M1}) by the ROX
+      channel (\texttt{X4\_M4}), cancelling volume and optical differences.
+\item \textbf{Find liftoff} --- a rolling-window step detector locates the cycle
+      where the curve leaves its baseline.
+\item \textbf{Fit and remove background} --- a robust (Theil--Sen) straight line is
+      fitted to FAM and to ROX over the pre-liftoff region and subtracted. Being
+      robust is the point: one off-trend early cycle cannot tilt the baseline.
+\item \textbf{Set the threshold} --- one threshold for the whole plate, solved so
+      the mean qPOS Ct equals the target Ct.
+\item \textbf{Interpolate Ct} --- the crossing of the background-subtracted curve
+      with that threshold.
+\end{enumerate}
+
+A plate-level reference intercept (the median across wells, ignoring wells below
+20\,\% of maximum ROX) ties all wells to a common baseline.
+
+\section{Troubleshooting}
+\begin{center}
+\begin{tabular}{|p{0.40\textwidth}|p{0.54\textwidth}|}
+\hline
+\textbf{Message or symptom} & \textbf{Cause and fix} \\ \hline
+\texttt{No Raw Data file found} & None of the uploaded files is a Raw Data export.
+Re-export from DA2 and include it. \\ \hline
+\texttt{Failed to read \dots: Worksheet named 'Raw Data' not found} & The uploaded
+workbook has no Raw Data sheet --- e.g. a Multicomponent-only export. Upload the
+Raw Data one. \\ \hline
+\emph{Please select at least one qPOS well} & No qPOS chosen; nothing can anchor the
+threshold. \\ \hline
+Threshold error, or no Cq anywhere & The qPOS wells probably do not amplify. Check
+you selected the right wells for \emph{this} plate --- qPOS positions differ between
+plate designs. \\ \hline
+A few wells report no Cq & Either flagged empty (FAM and ROX both under 5\,\% of
+plate max) or the curve never crosses the threshold. \\ \hline
+Cq differs from DA2 & Expected. DA2 uses its own threshold and baseline; HomeBrew
+anchors to your qPOS. Compare HomeBrew to HomeBrew. \\ \hline
+\end{tabular}
+\end{center}
+
+\section{Version}
+\textbf{1.4.0} --- HomeBrew 1.4: Theil--Sen robust baseline, defaults
+start cycle 5 / window 8 / Shannon limit 50 / target Ct 25.0. Verified against the
+SPR Middleware v1.4 reference on a 194-well plate: SD 0.013 cycles, maximum
+difference 0.14 cycles, correlation 0.999996.
+
+\vfill
+\noindent\textcolor{navy}{\rule{\linewidth}{0.8pt}}\\
+\small Contact: Jiachong Chu (\texttt{Jiachong.Chu@spear.bio}) · Spear Bio Platform Development
+\end{document}
